@@ -1,0 +1,27 @@
+#!/bin/bash
+# Builda e sobe os serviços em produção via PM2
+set -e
+
+echo "🔨 Buildando frontend..."
+cd /home/projetos/chat_box/frontend
+npm run build
+
+echo ""
+echo "🔨 Buildando backend..."
+cd /home/projetos/chat_box/backend
+npm run build
+
+echo ""
+echo "🚀 Subindo serviços em produção..."
+# Recria os processos para garantir que o config atualizado seja aplicado
+pm2 delete chatbox-frontend chatbox-backend chatbox-bot 2>/dev/null || true
+pm2 start /home/projetos/chat_box/ecosystem.config.js
+
+echo ""
+echo "💾 Salvando lista PM2..."
+pm2 save
+
+echo ""
+pm2 list
+echo ""
+echo "✅ Produção no ar! https://team.muniz.remotenyx.com.br"

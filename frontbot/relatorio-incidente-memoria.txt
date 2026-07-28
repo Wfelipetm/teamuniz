@@ -1,0 +1,167 @@
+=================================================================
+RELATORIO - INCIDENTE DE MEMORIA E CORRECOES APLICADAS
+Servidor: vps-15416144.143.95.215.41
+Data do relatorio: 14/07/2026
+=================================================================
+
+1. O QUE ACONTECEU
+-----------------------------------------------------------------
+No dia 08/07/2026, durante um deploy, os apps "invictus-backend" e
+"invictus-frontend" (projeto TreinoInvictus/coachrun) ficaram
+temporariamente sem as pastas node_modules completas (erros
+"Cannot find module 'dotenv'" e "Cannot find module .../next"),
+sintoma tipico de um npm install/build em andamento.
+
+O processo de build consumiu cerca de 2.4 a 2.6 GB de RAM sozinho,
+em um servidor com apenas 3.8 GB de RAM total (rodando ao mesmo
+tempo MySQL, PostgreSQL, fail2ban, nginx e 5 aplicacoes Node/Next.js
+de dois projetos). O kernel do Linux entrou em modo de emergencia
+(OOM Killer) e matou processos "node" as 11:15, duas vezes.
+
+O PM2 reiniciou os apps automaticamente 101 e 83 vezes ate que o
+deploy terminasse e o node_modules ficasse consistente novamente,
+estabilizando sozinho depois de algumas horas.
+
+Alem da causa raiz do estouro de memoria, foram encontrados e
+corrigidos problemas SEPARADOS que agravavam a situacao:
+
+  - O "ecosystem.config.js" do teamuniz-backend nao definia o
+    diretorio de trabalho (cwd) correto, entao o arquivo .env com
+    as credenciais reais nunca era carregado. O app caia para
+    valores padrao (dialeto MySQL, usuario vazio) e ficava em loop
+    infinito de erro de conexao, gerando um arquivo de log de
+    496 MB e crescendo sem parar.
+
+  - O usuario/banco configurados no .env do teamuniz nao batiam
+    com o que existia de fato no PostgreSQL (chatbot/chatbox no
+    .env vs chatbox/chatbox_db reais), e as migrations do banco
+    nunca tinham rodado nesse Postgres - mascarado o tempo todo
+    pelo bug do cwd acima.
+
+  - O Redis nunca esteve de fato instalado/rodando no servidor,
+    apesar do app esperar ele na porta 6381.
+
+  - O frontbot tambem estava com a senha do Postgres errada,
+    gerando erro silencioso a cada tentativa de agendamento.
+
+
+2. O QUE FOI FEITO PARA COLOCAR TUDO NO AR
+-----------------------------------------------------------------
+  - Corrigido o "cwd" no ecosystem.config.js do teamuniz-backend.
+  - Resetada a senha do usuario "chatbox" no PostgreSQL (autorizado
+    pelo usuario) e corrigido o .env (DB_USER/DB_NAME corretos).
+  - Rodadas as migrations do Sequelize que nunca tinham sido
+    aplicadas nesse banco; criada e aplicada uma migration nova
+    para uma coluna ("language") que existia no modelo mas nunca
+    tinha migration correspondente.
+  - Instalado e configurado o Redis nativo (systemd), na porta
+    6381, com senha e limite de memoria (256 MB), so acessivel
+    via localhost.
+  - Corrigida a senha do Postgres no .env do frontbot (mesmo tipo
+    de bug do backend).
+  - Arquivado (comprimido) e limpo o log de 496 MB.
+
+Resultado: as 5 aplicacoes (invictus-backend, invictus-frontend,
+teamuniz-backend, teamuniz-bot, teamuniz-frontend) voltaram a
+responder normalmente.
+
+
+3. O QUE FOI FEITO PARA NUNCA MAIS ESTOURAR A MEMORIA
+-----------------------------------------------------------------
+Cinco camadas de protecao foram adicionadas, todas confirmadas
+ativas e configuradas para sobreviver a um reboot do servidor:
+
+  a) max_memory_restart (600 MB) em todas as 5 aplicacoes do PM2.
+     Cada app reinicia sozinho antes de conseguir crescer demais
+     e comprometer o servidor inteiro.
+
+  b) pm2-logrotate instalado e configurado (limite de 20 MB por
+     arquivo de log, 7 rotacoes, compressao). Evita que um app
+     travado em loop de erro volte a gerar um log de centenas de
+     MB como aconteceu no dia 08/07.
+
+  c) earlyoom instalado e habilitado no boot. E' um programa que
+     mata o processo que mais consome memoria de forma controlada,
+     ANTES que o kernel entre em panico e mate algo critico ao
+     acaso. Configurado para nunca escolher sshd, MySQL, Postgres,
+     nginx ou fail2ban como vitima.
+
+  d) Protecao contra o OOM Killer (oom_score_adj) configurada no
+     MySQL (o Postgres ja tinha essa protecao de fabrica). Isso
+     reduz bastante a chance do banco de dados ser a vitima em um
+     eventual novo aperto de memoria.
+
+  e) Redis com limite de memoria proprio (256 MB), evitando que
+     ele mesmo vire um consumidor de memoria sem controle.
+
+O QUE ISSO MUDA NA PRATICA: se uma situacao parecida acontecer de
+novo (por exemplo, um build/deploy pesado rodando ao mesmo tempo
+que uma sessao de desenvolvimento remoto), o "earlyoom" mata so o
+processo ofensor antes do kernel entrar em panico, e como banco de
+dados e aplicacoes ja tem prioridade/limite definidos, o resto do
+servidor continua de pe. Na pior hipotese, um deploy falha e
+precisa ser rodado de novo - mas o site nao cai por inteiro como
+aconteceu no dia 08/07.
+
+UNICO PONTO QUE AINDA MERECE ATENCAO: rodar "npm install"/"next
+build" (que nao e gerenciado pelo PM2, entao o limite de 600 MB
+nao vale para esse processo) ao mesmo tempo que uma sessao do
+VS Code Remote esta aberta consome bastante memoria de uma vez so
+- foi exatamente essa combinacao que causou o problema original.
+Recomendado fazer deploys com a sessao de desenvolvimento fechada
+ate o upgrade de RAM do servidor ser feito. Depois do upgrade,
+isso deixa de ser uma preocupacao relevante.
+
+
+4. AUDITORIA DE SEGURANCA - RESUMO
+-----------------------------------------------------------------
+Foi feita uma revisao de seguranca nos dois projetos (coachrun e
+teamuniz) e na infraestrutura do servidor. Os problemas CRITICOS
+encontrados no teamuniz (explorav eis diretamente pela internet)
+ja foram corrigidos:
+
+  - Falha que permitia criar um usuario administrador em qualquer
+    empresa cliente, sem nenhuma autenticacao (corrigido).
+  - Falha que permitia executar comandos no servidor atraves de um
+    nome de arquivo de audio manipulado, no envio de midia via
+    WhatsApp (corrigido).
+  - Falha que permitia uma empresa cliente ler/cancelar/adulterar
+    campanhas de disparo de outra empresa (corrigido).
+  - Segredos de autenticacao (JWT) usando valores padrao de
+    templates publicos, tanto no teamuniz quanto no coachrun
+    (rotacionados para valores unicos e aleatorios).
+
+Itens que ainda ficam como recomendacao, sem alteracao automatica
+por envolverem mais risco/decisao:
+
+  - Acesso SSH ao servidor permite login do usuario root com senha
+    (nao so chave), e o servidor ja sofreu mais de 6.500 tentativas
+    de forca bruta. Recomendado migrar para autenticacao somente
+    por chave.
+  - As 5 aplicacoes Node e o MySQL escutam em todas as interfaces
+    de rede (0.0.0.0) e nao so localhost - hoje protegidas apenas
+    pelo firewall (ufw).
+  - Faltam cabecalhos de seguranca (CSP, HSTS) configurados no
+    nginx.
+  - Upload de arquivos no teamuniz sem validacao completa de
+    caminho/tipo, pasta criada com permissao aberta demais.
+  - 42 vulnerabilidades conhecidas em bibliotecas do backend do
+    teamuniz (7 criticas) - recomendado revisar com calma.
+  - O projeto "backend-whatsApp" dentro do coachrun parece ser uma
+    copia/implantacao abandonada do mesmo app do teamuniz (mesmas
+    credenciais de banco) e nao esta em execucao atualmente.
+
+
+5. STATUS ATUAL (14/07/2026)
+-----------------------------------------------------------------
+  - invictus-backend .... online
+  - invictus-frontend ... online
+  - teamuniz-backend .... online (banco e Redis funcionando)
+  - teamuniz-bot ........ online
+  - teamuniz-frontend ... online
+  - Memoria disponivel no servidor: dentro do esperado, sem sinais
+    de pressao.
+
+=================================================================
+Fim do relatorio.
+=================================================================

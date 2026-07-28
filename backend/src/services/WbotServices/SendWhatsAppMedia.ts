@@ -1,0 +1,222 @@
+import { WAMessage, AnyMessageContent } from "@whiskeysockets/baileys";
+import * as Sentry from "@sentry/node";
+import fs from "fs";
+import { execFile } from "child_process";
+import path from "path";
+import ffmpegPath from "@ffmpeg-installer/ffmpeg";
+import AppError from "../../errors/AppError";
+import GetTicketWbot from "../../helpers/GetTicketWbot";
+import { getCorrectDestinationJid } from "../../helpers/GetCorrectDestinationJid";
+import Ticket from "../../models/Ticket";
+import { lookup } from "mime-types";
+import formatBody from "../../helpers/Mustache";
+import { logger } from "../../utils/logger";
+
+interface Request {
+  media: Express.Multer.File;
+  ticket: Ticket;
+  body?: string;
+}
+
+const publicFolder = path.resolve(__dirname, "..", "..", "..", "public");
+
+const processAudio = async (audio: string): Promise<string> => {
+  const outputAudio = `${publicFolder}/${new Date().getTime()}.mp3`;
+  return new Promise((resolve, reject) => {
+    execFile(
+      ffmpegPath.path,
+      ["-i", audio, "-vn", "-ab", "128k", "-ar", "44100", "-f", "ipod", outputAudio, "-y"],
+      (error, _stdout, _stderr) => {
+        if (error) reject(error);
+        fs.unlinkSync(audio);
+        resolve(outputAudio);
+      }
+    );
+  });
+};
+
+const processAudioFile = async (audio: string): Promise<string> => {
+  const outputAudio = `${publicFolder}/${new Date().getTime()}.mp3`;
+  return new Promise((resolve, reject) => {
+    execFile(
+      ffmpegPath.path,
+      ["-i", audio, "-vn", "-ar", "44100", "-ac", "2", "-b:a", "192k", outputAudio],
+      (error, _stdout, _stderr) => {
+        if (error) reject(error);
+        fs.unlinkSync(audio);
+        resolve(outputAudio);
+      }
+    );
+  });
+};
+
+export const getMessageOptions = async (
+  fileName: string,
+  pathMedia: string,
+  body?: string
+): Promise<any> => {
+  const mimeType = lookup(pathMedia) || "";
+  const typeMessage = mimeType.split("/")[0];
+
+  try {
+    if (!mimeType) {
+      throw new Error("Invalid mimetype");
+    }
+    let options: AnyMessageContent;
+
+    if (typeMessage === "video") {
+      options = {
+        video: fs.readFileSync(pathMedia),
+        caption: body ? body : "",
+        fileName: fileName
+        // gifPlayback: true
+      };
+    } else if (typeMessage === "audio") {
+      const typeAudio = true; //fileName.includes("audio-record-site");
+      const convert = await processAudio(pathMedia);
+      if (typeAudio) {
+        options = {
+          audio: fs.readFileSync(convert),
+          mimetype: typeAudio ? "audio/mp4" : mimeType,
+          caption: body ? body : null,
+          ptt: true
+        };
+      } else {
+        options = {
+          audio: fs.readFileSync(convert),
+          mimetype: typeAudio ? "audio/mp4" : mimeType,
+          caption: body ? body : null,
+          ptt: true
+        };
+      }
+    } else if (typeMessage === "document") {
+      options = {
+        document: fs.readFileSync(pathMedia),
+        caption: body ? body : null,
+        fileName: fileName,
+        mimetype: mimeType
+      };
+    } else if (typeMessage === "application") {
+      options = {
+        document: fs.readFileSync(pathMedia),
+        caption: body ? body : null,
+        fileName: fileName,
+        mimetype: mimeType
+      };
+    } else {
+      options = {
+        image: fs.readFileSync(pathMedia),
+        caption: body ? body : null
+      };
+    }
+
+    return options;
+  } catch (e) {
+    Sentry.captureException(e);
+    console.log(e);
+    return null;
+  }
+};
+
+const SendWhatsAppMedia = async ({
+  media,
+  ticket,
+  body
+}: Request): Promise<WAMessage> => {
+  try {
+    const wbot = await GetTicketWbot(ticket);
+
+    // ============================================================================
+    // OBTER JID CORRETO PARA ENVIO DE MÍDIA - Respeitando LIDs e números reais
+    // ============================================================================
+    logger.info(`[SEND-MEDIA] 📤 Preparando envio de mídia`);
+    logger.info(`[SEND-MEDIA]   Ticket ID: ${ticket.id}`);
+    logger.info(`[SEND-MEDIA]   Contato ID: ${ticket.contact.id}`);
+    logger.info(`[SEND-MEDIA]   Contato Nome: ${ticket.contact.name}`);
+    logger.info(`[SEND-MEDIA]   Tipo de mídia: ${media.mimetype}`);
+    
+    // Obter JID correto (prioriza última msg recebida, incluindo LIDs)
+    const destinationJid = await getCorrectDestinationJid(ticket);
+    
+    logger.info(`[SEND-MEDIA] ✅ JID de destino determinado: ${destinationJid}`);
+    
+    if (destinationJid.includes('@lid')) {
+      logger.warn(`[SEND-MEDIA] ⚠️ Enviando mídia para LID (WhatsApp Web/Business)`);
+      logger.warn(`[SEND-MEDIA]   O usuário está usando WhatsApp Web ou Business`);
+      logger.warn(`[SEND-MEDIA]   Mídia será enviada para o dispositivo específico`);
+    }
+
+    const pathMedia = media.path;
+    const typeMessage = media.mimetype.split("/")[0];
+    let options: AnyMessageContent;
+    const bodyMessage = formatBody(body, ticket.contact);
+
+    if (typeMessage === "video") {
+      options = {
+        video: fs.readFileSync(pathMedia),
+        caption: bodyMessage,
+        fileName: media.originalname
+        // gifPlayback: true
+      };
+    } else if (typeMessage === "audio") {
+      const typeAudio = media.originalname.includes("audio-record-site");
+      if (typeAudio) {
+        const convert = await processAudio(media.path);
+        options = {
+          audio: fs.readFileSync(convert),
+          mimetype: typeAudio ? "audio/mp4" : media.mimetype,
+          ptt: true
+        };
+      } else {
+        const convert = await processAudioFile(media.path);
+        options = {
+          audio: fs.readFileSync(convert),
+          mimetype: typeAudio ? "audio/mp4" : media.mimetype
+        };
+      }
+    } else if (typeMessage === "document" || typeMessage === "text") {
+      options = {
+        document: fs.readFileSync(pathMedia),
+        caption: bodyMessage,
+        fileName: media.originalname,
+        mimetype: media.mimetype
+      };
+    } else if (typeMessage === "application") {
+      options = {
+        document: fs.readFileSync(pathMedia),
+        caption: bodyMessage,
+        fileName: media.originalname,
+        mimetype: media.mimetype
+      };
+    } else {
+      options = {
+        image: fs.readFileSync(pathMedia),
+        caption: bodyMessage
+      };
+    }
+
+    logger.info(`[SEND-MEDIA] 📨 Enviando mídia para: ${destinationJid}`);
+
+    const sentMessage = await wbot.sendMessage(
+      destinationJid,
+      {
+        ...options
+      }
+    );
+
+    await ticket.update({ lastMessage: bodyMessage });
+
+    logger.info(`[SEND-MEDIA] ✅ Mídia enviada com sucesso!`);
+    logger.info(`[SEND-MEDIA]   Message ID: ${sentMessage.key.id}`);
+    logger.info(`[SEND-MEDIA]   Destination: ${destinationJid}`);
+
+    return sentMessage;
+  } catch (err) {
+    Sentry.captureException(err);
+    logger.error(`[SEND-MEDIA] ❌ Erro ao enviar mídia:`);
+    logger.error(`[SEND-MEDIA]   ${err}`);
+    throw new AppError("ERR_SENDING_WAPP_MSG");
+  }
+};
+
+export default SendWhatsAppMedia;

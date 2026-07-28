@@ -1,0 +1,29 @@
+version: "3.8"
+
+# NOTA: Se já existe PostgreSQL nativo na porta 5432 (como neste servidor),
+# este docker-compose é OPCIONAL. A aplicação já está configurada para
+# conectar via DATABASE_URL no .env.
+#
+# Para usar este container em outro ambiente, ajuste a porta ou pare o PG nativo.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: chatbox_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: chatbox
+      POSTGRES_PASSWORD: chatbox_secret
+      POSTGRES_DB: chatbox_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatbox -d chatbox_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:

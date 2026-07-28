@@ -1,0 +1,33 @@
+#!/bin/bash
+# Para TODOS os serviços (PM2 + processos avulsos) para desenvolvimento
+echo "🛑 Parando serviços de produção..."
+
+# 1) Para via PM2 (se estiver gerenciado)
+pm2 stop chatbox-frontend chatbox-backend chatbox-bot 2>/dev/null || true
+
+# 2) Mata processos avulsos do bot (porta 3001)
+BOT_PIDS=$(lsof -ti :3001 2>/dev/null || true)
+if [ -n "$BOT_PIDS" ]; then
+    echo "   Matando bot na porta 3001 (PID: $BOT_PIDS)..."
+    kill $BOT_PIDS 2>/dev/null || true
+fi
+
+# 3) Mata processos avulsos do backend (porta 4002)
+BACK_PIDS=$(lsof -ti :4002 2>/dev/null || true)
+if [ -n "$BACK_PIDS" ]; then
+    echo "   Matando backend na porta 4002 (PID: $BACK_PIDS)..."
+    kill $BACK_PIDS 2>/dev/null || true
+fi
+
+# 4) Mata processos avulsos do frontend (porta 4003)
+FRONT_PIDS=$(lsof -ti :4003 2>/dev/null || true)
+if [ -n "$FRONT_PIDS" ]; then
+    echo "   Matando frontend na porta 4003 (PID: $FRONT_PIDS)..."
+    kill $FRONT_PIDS 2>/dev/null || true
+fi
+
+echo ""
+echo "✅ Todos os serviços parados. Agora você pode rodar em modo dev:"
+echo "   Bot:      cd bot && node server.js"
+echo "   Frontend: cd frontend && npm run dev"
+echo "   Backend:  cd backend && npm run dev:server"

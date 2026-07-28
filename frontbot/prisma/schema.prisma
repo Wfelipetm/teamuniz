@@ -1,0 +1,343 @@
+// Prisma schema – PostgreSQL
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  USER
+  ALUNO
+}
+
+model Box {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  createdAt DateTime  @default(now())
+
+  users     User[]
+  programs  BoxProgram[]
+  schedules BoxSchedule[]
+  plans     BoxPlan[]
+  videoTips VideoTip[]
+}
+
+model User {
+  id            Int       @id @default(autoincrement())
+  email         String    @unique
+  password      String
+  name          String    @default("Admin")
+  role          Role      @default(USER)
+  active        Boolean   @default(true)
+  boxId         Int?
+  avatar        String?
+  lastLoginAt   DateTime?
+  lastLoginIp   String?
+  failedLogins  Int       @default(0)
+  lockedUntil   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  box                Box?              @relation(fields: [boxId], references: [id])
+  sessions           Session[]
+  auditLogs          AuditLog[]
+  userConfig         UserConfig?
+  dayPhotos          DayPhoto[]
+  scheduledMessages  ScheduledMessage[]
+  sendLogs           SendLog[]
+  videoTips          VideoTip[]
+  boxPrograms        BoxProgram[]
+  flowConfig         FlowConfig?
+  flowLeads          FlowLead[]
+  groupAutomations   GroupAutomation[]
+
+  @@index([email])
+  @@index([boxId])
+}
+
+model UserConfig {
+  id           Int    @id @default(autoincrement())
+  userId       Int    @unique
+  groupJid     String @default("")
+  timezone     String @default("America/Sao_Paulo")
+  message      String @default("Bom dia! Aqui vai o treino de hoje! 💪")
+  scheduleTime String @default("05:00")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model GroupAutomation {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  groupJid     String
+  groupName    String   @default("")
+  timezone     String   @default("America/Sao_Paulo")
+  scheduleTime String   @default("05:00")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  days GroupAutomationDay[]
+
+  @@unique([userId, groupJid])
+  @@index([userId])
+}
+
+model GroupAutomationDay {
+  id           Int     @id @default(autoincrement())
+  automationId Int
+  day          Int     // 0=Dom 1=Seg 2=Ter 3=Qua 4=Qui 5=Sex 6=Sáb
+  message      String  @default("")
+  enabled      Boolean @default(true)
+
+  automation GroupAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  @@unique([automationId, day])
+  @@index([automationId])
+}
+
+model DayPhoto {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  day       Int
+  mimeType  String
+  data      String
+  message   String?
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, day])
+  @@index([userId])
+}
+
+model ScheduledMessage {
+  id            Int       @id @default(autoincrement())
+  userId        Int
+  groupJid      String
+  message       String?
+  mediaBase64   String?
+  mediaMimeType String?
+  scheduledAt   DateTime
+  sent          Boolean   @default(false)
+  sentAt        DateTime?
+  error         String?
+  createdAt     DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([scheduledAt, sent])
+}
+
+model Session {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  token     String   @unique
+  ip        String?
+  userAgent String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+}
+
+model SendLog {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  day           Int
+  groupJid      String
+  hadPhoto      Boolean  @default(false)
+  photoData     String?
+  photoMimeType String?
+  source        String   @default("auto")
+  error         String?
+  sentAt        DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([sentAt])
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  action    String
+  detail    String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model VideoTip {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  category    String   @default("geral")
+  filename    String   @unique
+  duration    Int?
+  filesize    Int?
+  uploadedBy  Int
+  boxId       Int?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [uploadedBy], references: [id], onDelete: Cascade)
+  box  Box?  @relation(fields: [boxId], references: [id], onDelete: SetNull)
+
+  @@index([category])
+  @@index([uploadedBy])
+  @@index([boxId])
+}
+
+model BoxProgram {
+  id            Int      @id @default(autoincrement())
+  boxId         Int
+  date          DateTime @db.Date
+  title         String
+  content       String
+  imageData     String?
+  imageMimeType String?
+  createdBy     Int
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  box  Box  @relation(fields: [boxId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+
+  @@index([boxId, date])
+  @@index([createdBy])
+}
+
+model BoxSchedule {
+  id        Int     @id @default(autoincrement())
+  boxId     Int
+  dayOfWeek Int
+  startTime String
+  endTime   String
+  className String
+  coach     String?
+  active    Boolean @default(true)
+
+  box Box @relation(fields: [boxId], references: [id], onDelete: Cascade)
+
+  @@index([boxId, dayOfWeek])
+}
+
+model BoxPlan {
+  id          Int     @id @default(autoincrement())
+  boxId       Int
+  name        String
+  description String?
+  price       Float
+  period      String  @default("mensal")
+  features    String?
+  highlighted Boolean @default(false)
+  active      Boolean @default(true)
+  sortOrder   Int     @default(0)
+
+  box Box @relation(fields: [boxId], references: [id], onDelete: Cascade)
+
+  @@index([boxId])
+}
+
+// ── Fluxo de atendimento (Team Muniz / bot de vendas) ────────────────────────
+
+model FlowConfig {
+  id                Int      @id @default(autoincrement())
+  userId            Int      @unique
+  enabled           Boolean  @default(false)
+  ownerName         String   @default("o Personal Trainer")
+  welcomeMessage    String   @default("Olá! Seja bem-vindo(a) ao *Team Muniz 57* 💪\n\nSou o assistente virtual do personal trainer. Como posso te ajudar hoje?")
+  menuMessage       String   @default("Escolha uma das opções abaixo:")
+  offHoursMessage   String   @default("Nosso atendimento é das *06h às 20h*. Retornaremos em breve! 🙏")
+  humanMessage      String   @default("Ótima escolha! 🎉 Vou te conectar com o personal agora. Aguarde um instante...")
+  attendanceStart   Int      @default(6)
+  attendanceEnd     Int      @default(20)
+  reminderDays      Int      @default(3)
+  followupMessage   String   @default("Oi! Tudo bem? 😊 Passando para saber como você está se sentindo com os treinos. Tem alguma dúvida ou feedback?")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  menuItems FlowMenuItem[]
+}
+
+model FlowMenuItem {
+  id          Int     @id @default(autoincrement())
+  configId    Int
+  parentId    Int?
+  sortOrder   Int     @default(0)
+  label       String
+  description String  @default("")
+  price       String  @default("")
+  isHuman     Boolean @default(false)
+
+  config FlowConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@index([configId])
+  @@index([parentId])
+}
+
+model FlowLead {
+  id           Int       @id @default(autoincrement())
+  userId       Int
+  phone        String
+  name         String    @default("")
+  step         String    @default("menu")
+  selectedItem Int?
+  converted    Boolean   @default(false)
+  lastContact  DateTime  @default(now())
+  reminderSent DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, phone])
+  @@index([userId])
+  @@index([lastContact])
+}
+
+model AccessRequest {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String
+  phone     String   @default("")
+  message   String   @default("")
+  status    String   @default("pending")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+model Product {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String   @default("")
+  price       String   @default("")
+  category    String   @default("Geral")
+  tag         String   @default("")
+  photoUrl    String   @default("")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+  @@index([active])
+}
