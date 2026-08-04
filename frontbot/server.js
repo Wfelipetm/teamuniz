@@ -1984,7 +1984,7 @@ setInterval(async () => {
 }, 60 * 60 * 1000);
 
 // ── Iniciar: reconecta usuários com sessão salva ───────────────────────────────
-app.listen(PORT, () => {
+app.listen(PORT, "127.0.0.1", () => {
     console.log(`[BOT] Servidor rodando em http://localhost:${PORT}`);
     console.log(`[BOT] Banco: PostgreSQL`);
 

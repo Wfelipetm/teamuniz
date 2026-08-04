@@ -9,6 +9,7 @@ const withPWA = require('next-pwa')({
 
 const nextConfig = {
   reactStrictMode: true,
+  poweredByHeader: false,
   env: {
     REACT_APP_BACKEND_URL: process.env.REACT_APP_BACKEND_URL,
     REACT_APP_HOURS_CLOSE_TICKETS_AUTO: process.env.REACT_APP_HOURS_CLOSE_TICKETS_AUTO,

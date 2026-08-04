@@ -3,12 +3,12 @@
 echo "🛑 Parando serviços de produção..."
 
 # 1) Para via PM2 (se estiver gerenciado)
-pm2 stop chatbox-frontend chatbox-backend chatbox-bot 2>/dev/null || true
+pm2 stop teamuniz-frontend teamuniz-backend teamuniz-bot 2>/dev/null || true
 
-# 2) Mata processos avulsos do bot (porta 3001)
-BOT_PIDS=$(lsof -ti :3001 2>/dev/null || true)
+# 2) Mata processos avulsos do bot (porta 3002)
+BOT_PIDS=$(lsof -ti :3002 2>/dev/null || true)
 if [ -n "$BOT_PIDS" ]; then
-    echo "   Matando bot na porta 3001 (PID: $BOT_PIDS)..."
+    echo "   Matando bot na porta 3002 (PID: $BOT_PIDS)..."
     kill $BOT_PIDS 2>/dev/null || true
 fi
 
@@ -28,6 +28,6 @@ fi
 
 echo ""
 echo "✅ Todos os serviços parados. Agora você pode rodar em modo dev:"
-echo "   Bot:      cd bot && node server.js"
-echo "   Frontend: cd frontend && npm run dev"
+echo "   Bot:      cd frontbot && node server.js"
+echo "   Frontend: cd frontbot/webapp && npm run dev"
 echo "   Backend:  cd backend && npm run dev:server"
